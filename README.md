@@ -1,6 +1,16 @@
 # GetAttachmentsFromEmail
 - Login in Email and get attachments of unread emails
 
+# Requirements
+- MailKit
+
+# Config for Gmail
+- Username and password of the user mentioned in the property panel of IMAP mail activity
+- In ur gmail Accounts settings Turn on “Allow Secure apps” and try the workflow.
+- also make sure that IMAP is enables
+- In gmail you need to turn on the “Less secure app access”, this will allow UIPath to access gmail.
+- You can turn this on from the following: Google Account settings > Security > Less secure app access > on
+
 # Remember for google
 - Put the credentials.json
 - Drag credentials.json (downloaded in Step 1) into your Visual Studio Solution Explorer.

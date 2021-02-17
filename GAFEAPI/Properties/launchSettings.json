@@ -24,7 +24,7 @@
     "GAFEAPI": {
       "commandName": "Project",
       "launchBrowser": true,
-      "launchUrl": "weatherforecast",
+      "launchUrl": "api/attachment",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       },

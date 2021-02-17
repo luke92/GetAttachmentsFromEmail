@@ -1,9 +1,4 @@
-﻿using Google.Apis.Auth.OAuth2;
-using Google.Apis.Gmail.v1;
-using Google.Apis.Gmail.v1.Data;
-using Google.Apis.Services;
-using Google.Apis.Util.Store;
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -12,95 +7,143 @@ using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
-
+using MailKit.Net.Imap;
+using MailKit;
+using MailKit.Search;
+using MimeKit;
+using GAFEAPI.Models;
 
 // For more information on enabling Web API for empty projects, visit https://go.microsoft.com/fwlink/?LinkID=397860
 
 namespace GAFEAPI.Controllers
-{
+{   
     [Route("api/[controller]")]
     [ApiController]
     public class AttachmentController : ControllerBase
     {
+        private readonly IMAPConfiguration _imapConfiguration;
+
+        public AttachmentController(IMAPConfiguration imapConfiguration)
+        {
+            _imapConfiguration = imapConfiguration;
+        }
+
         // GET: api/<AttachmentController>
         [HttpGet]
-        public IEnumerable<string> Get()
+        public async Task<string> Get()
         {
-            return new string[] { "value1", "value2" };
-        }
-
-        // GET api/<AttachmentController>/5
-        [HttpGet("{id}")]
-        public string Get(int id)
-        {
-            // If modifying these scopes, delete your previously saved credentials
-            // at ~/.credentials/gmail-dotnet-quickstart.json
-            string[] Scopes = { GmailService.Scope.GmailReadonly };
-            string ApplicationName = "Gmail API .NET Quickstart";
-
             var response = "";
-           
-            UserCredential credential;
 
-            using (var stream =
-                new FileStream("credentials.json", FileMode.Open, FileAccess.Read))
+            var client = new ImapClient();
+            client.Connect(_imapConfiguration.Server, _imapConfiguration.Port, _imapConfiguration.UseSSL);
+            client.Authenticate(_imapConfiguration.Email, _imapConfiguration.Password);
+
+            // The Inbox folder is always available on all IMAP servers...
+            var inbox = client.Inbox;
+            inbox.Open(FolderAccess.ReadOnly);
+
+            //Unread Emails and not deleted
+            var query = SearchQuery.NotSeen.And(SearchQuery.NotDeleted);
+            //Filter by Subject
+            //query = query.And(SearchQuery.SubjectContains("subject"));
+
+            var results = inbox.Search(query);
+            // Get Items
+            var items = MessageSummaryItems.BodyStructure | MessageSummaryItems.UniqueId;
+            var matched = new UniqueIdSet();
+
+            foreach (var message in inbox.Fetch(results, items))
             {
-                // The file token.json stores the user's access and refresh tokens, and is created
-                // automatically when the authorization flow completes for the first time.
-                string credPath = "token.json";
-                credential = GoogleWebAuthorizationBroker.AuthorizeAsync(
-                    GoogleClientSecrets.Load(stream).Secrets,
-                    Scopes,
-                    "user",
-                    CancellationToken.None,
-                    new FileDataStore(credPath, true)).Result;
-                response += "Credential file saved to: " + credPath + Environment.NewLine;
-            }
-
-            // Create Gmail API service.
-            var service = new GmailService(new BaseClientService.Initializer()
-            {
-                HttpClientInitializer = credential,
-                ApplicationName = ApplicationName,
-            });
-
-            // Define parameters of request.
-            UsersResource.LabelsResource.ListRequest request = service.Users.Labels.List("me");
-
-            // List labels.
-            IList<Label> labels = request.Execute().Labels;
-            response += "Labels:" + Environment.NewLine;
-            if (labels != null && labels.Count > 0)
-            {
-                foreach (var labelItem in labels)
+                //Has Attachment
+                if (message.BodyParts.Any(x => x.IsAttachment))
                 {
-                    response += string.Format("{0}", labelItem.Name) + Environment.NewLine;
-                }
+                    response += message.UniqueId + Environment.NewLine;
+                    matched.Add(message.UniqueId);
+                }                    
             }
-            else
-            {
-                response += "No labels found.";
-            }
+
+            response += string.Format("Unread messages with attachments: {0}", matched.Count) + Environment.NewLine;
+
+            client.Disconnect(true);
 
             return response;
+
         }
 
-        // POST api/<AttachmentController>
-        [HttpPost]
-        public void Post([FromBody] string value)
+        // GET: api/<AttachmentController>/id
+        [HttpGet("GetMessage/{id}")]
+        public async Task<string> GetMessage(string id)
         {
+            var response = "";
+
+            var client = new ImapClient();
+            client.Connect(_imapConfiguration.Server, _imapConfiguration.Port, _imapConfiguration.UseSSL);
+            client.Authenticate(_imapConfiguration.Email, _imapConfiguration.Password);
+
+            // The Inbox folder is always available on all IMAP servers...
+            var inbox = client.Inbox;
+            inbox.Open(FolderAccess.ReadWrite);
+
+            uint.TryParse(id, out var uid);
+            var uniqueId = new UniqueId(uid);
+            response += inbox.GetMessage(uniqueId);
+
+            //Mark as read
+            inbox.AddFlags(uniqueId, MessageFlags.Seen, true);
+
+            client.Disconnect(true);
+
+            return response;
+
         }
 
-        // PUT api/<AttachmentController>/5
-        [HttpPut("{id}")]
-        public void Put(int id, [FromBody] string value)
+        // GET: api/<AttachmentController>/id
+        [HttpGet("GetAttachment/{id}")]
+        public async Task<string> GetAttachment(string id)
         {
-        }
+            var response = "";
 
-        // DELETE api/<AttachmentController>/5
-        [HttpDelete("{id}")]
-        public void Delete(int id)
-        {
+            var client = new ImapClient();
+            client.Connect(_imapConfiguration.Server, _imapConfiguration.Port, _imapConfiguration.UseSSL);
+            client.Authenticate(_imapConfiguration.Email, _imapConfiguration.Password);
+
+            // The Inbox folder is always available on all IMAP servers...
+            var inbox = client.Inbox;
+            inbox.Open(FolderAccess.ReadWrite);
+
+            uint.TryParse(id, out var uid);
+
+            var message = inbox.GetMessage(new UniqueId(uid));
+
+            foreach (var attachment in message.Attachments)
+            {
+                var fileName = attachment.ContentDisposition?.FileName ?? attachment.ContentType.Name;
+
+                response += fileName + Environment.NewLine;
+
+                /*
+                using (var stream = File.Create(fileName))
+                {
+                    if (attachment is MessagePart)
+                    {
+                        var rfc822 = (MessagePart)attachment;
+
+                        rfc822.Message.WriteTo(stream);
+                    }
+                    else
+                    {
+                        var part = (MimePart)attachment;
+
+                        part.Content.DecodeTo(stream);
+                    }
+                }
+                */
+            }
+
+            client.Disconnect(true);
+
+            return response;
+
         }
     }
 }
